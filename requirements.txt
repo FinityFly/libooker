@@ -1,6 +1,5 @@
 selenium
 requests
 datetime
-time
 pytz
 json

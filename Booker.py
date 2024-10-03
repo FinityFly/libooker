@@ -12,11 +12,14 @@ import json
 
 class Booker:
 
-    def __init__(self, days, start_hour, end_hour):
+    def __init__(self, days, start_hour, end_hour, headless=True):
         self.BASE_URL = "https://carletonu.libcal.com/spaces?lid=2986&gid=0&c=0"
-        chrome_options = Options()
-        chrome_options.add_argument("--headless=new")
-        self.driver = webdriver.Chrome(options=chrome_options)
+        if headless:
+            chrome_options = Options()
+            chrome_options.add_argument("--headless")
+            self.driver = webdriver.Chrome(options=chrome_options)
+        else:
+            self.driver = webdriver.Chrome()
         self.days = days
         self.start_hour = start_hour
         self.end_hour = end_hour
