@@ -103,29 +103,26 @@ class Booker:
         # add room to selection
         room["element"].click()
         self.driver.implicitly_wait(5)
-        time.sleep(2)
+        time.sleep(1)
 
         # select latest end time
-        print("1")
         select_element = self.driver.find_element(By.ID, "bookingend_1")
+        time.sleep(1)
         select_element.click()
-        print("2")
+        self.driver.implicitly_wait(5)
+
         select = Select(select_element)
         last_option = select.options[-1]
         select.select_by_visible_text(last_option.text)
-        print("3")
 
         date_string_cleaned = last_option.text.replace('rd', '').replace('th', '').replace('st', '')
         date_format = '%I:%M%p %a %b %d %Y'
         dt_object = datetime.strptime(date_string_cleaned, date_format)
-        print("4")
         room["end"] = dt_object
         self.driver.implicitly_wait(5)
-        print("5")
 
         self.driver.find_element(By.ID, "submit_times").click()
         self.driver.implicitly_wait(5)
-        print("6")
 
         # check if element exists
         try:
