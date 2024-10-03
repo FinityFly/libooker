@@ -25,6 +25,13 @@ class Booker:
         self.end_hour = end_hour
 
     def click_next_day(self, visited_dates):
+        # check if existing booking is already selected, if there is, remove it
+        try:
+            button = self.driver.find_element(By.CLASS_NAME, "input-group-btn")
+            button.click()
+        except NoSuchElementException:
+            print("Element with class 'input-group-btn' does not exist.")
+
         goToDateButton = self.driver.find_element(By.CLASS_NAME, "fc-goToDate-button")
         goToDateButton.click()
         table = self.driver.find_element(By.CLASS_NAME, "table-condensed")
@@ -96,7 +103,7 @@ class Booker:
         # add room to selection
         room["element"].click()
         self.driver.implicitly_wait(5)
-        time.sleep(1)
+        time.sleep(2)
 
         # select latest end time
         select_element = self.driver.find_element(By.ID, "bookingend_1")
@@ -128,6 +135,7 @@ class Booker:
                 self.driver.implicitly_wait(5)
                 break
         except NoSuchElementException:
+            print("Already logged in")
             # already logged in, just book the room
             pass
 
@@ -145,7 +153,7 @@ class Booker:
             print(f"Successfully booked room {room['room']} on {room['start']}-{room['end']} for {room['booking_time']} minutes")
             return True
         except NoSuchElementException:
-            print("Failed to book room")
+            print("Failed to finalize booking the room")
             return False
 
     def store_booking(self, room):
