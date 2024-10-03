@@ -1,4 +1,5 @@
 from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import Select
@@ -38,7 +39,7 @@ def click_next_day(visited_dates):
                 return False
     return False
 
-def find_available_rooms():
+def find_available_rooms(start_hour, end_hour):
     available_rooms = []
     grid = driver.find_elements(By.CLASS_NAME, "fc-timeline-event-harness")
     for index, cell in enumerate(grid):
@@ -48,9 +49,8 @@ def find_available_rooms():
         date_str = ' '.join(title[:5])
         date_format = '%I:%M%p %A, %B %d, %Y'
         parsed_date = datetime.strptime(date_str, date_format)
-        time_bound = [10, 17]
 
-        if title[-1] == 'Available' and time_bound[0] <= parsed_date.hour < time_bound[1]:
+        if title[-1] == 'Available' and start_hour <= parsed_date.hour < end_hour:
             # print("Available:", parsed_date)
             available_rooms.append({"start": parsed_date, "end": parsed_date + timedelta(minutes=30), "room": title[6], "element": cell})
 
@@ -81,14 +81,18 @@ def merge_bookings(available_rooms):
     return merged_bookings
 
 def book_room(room):
+    # add room to selection
     room["element"].click()
     driver.implicitly_wait(5)
-    time.sleep(3)
+    time.sleep(1)
+
+    # select latest end time
     select_element = driver.find_element(By.ID, "bookingend_1")
     select_element.click()
     select = Select(select_element)
     last_option = select.options[-1]
     select.select_by_visible_text(last_option.text)
+
     date_string_cleaned = last_option.text.replace('rd', '').replace('th', '').replace('st', '')
     date_format = '%I:%M%p %a %b %d %Y'
     dt_object = datetime.strptime(date_string_cleaned, date_format)
@@ -133,6 +137,7 @@ def book_room(room):
         return False
 
 def store_booking(room):
+    # store booking in bookings.json
     with open('bookings.json', 'r') as file:
         bookings = json.load(file)
     bookings.append({"start": room["start"].strftime('%Y-%m-%d %H:%M:%S'), "end": room["end"].strftime('%Y-%m-%d %H:%M:%S'), "room": room["room"]})
@@ -140,20 +145,21 @@ def store_booking(room):
         json.dump(bookings, file, indent=4)
 
 if "__main__" == __name__:
+    chrome_options = Options()
+    chrome_options.add_argument("--headless=new")
     driver = webdriver.Chrome()
-    driver.get(BASE_URL)
 
+    driver.get(BASE_URL)
     driver.implicitly_wait(5)
 
     select_element = driver.find_element(By.ID, "gid")
     select = Select(select_element)
     select.select_by_visible_text('Conversational Floor (Floor 2 or 4)')
-
     driver.implicitly_wait(5)
 
     visited_dates = []
 
-    # add dates from bookings to visited_dates
+    # add dates from bookings to visited_dates to prevent double booking days
     with open('bookings.json', 'r') as file:
         bookings = json.load(file)
     for booking in bookings:
@@ -161,21 +167,24 @@ if "__main__" == __name__:
         parsed_date = datetime.strptime(booking.get("start"), date_format)
         visited_dates.append(parsed_date.date())
 
+    # go through the calendar and click on the next available Tuesday or Thursday within a week
     while click_next_day(visited_dates):
-        print("Visited dates:", visited_dates)
-        available_rooms = find_available_rooms()
+        # find available rooms between start_hour and end_hour
+        available_rooms = find_available_rooms(start_hour=12, end_hour=17)
 
-        for room in available_rooms:
-            print(f"{room['start']} - {room['end']} : {room['room']}")
-
+        # merge bookings that are back to back and sort them by elapsed booking time
         merged_rooms = merge_bookings(available_rooms)
-        # sort merged rooms by booking time reversed
         merged_rooms.sort(key=lambda x: x['booking_time'], reverse=True)
+        merged_rooms.sort(key=lambda x: x['room'], reverse=True)
 
+        # book the room with the longest booking time
         for room in merged_rooms:
             print(f"{room['start']} - {room['end']} ({room['booking_time']}) : {room['room']}")
-            if book_room(room):
-                break
-
+            try:
+                if book_room(room):
+                    break
+            except:
+                print("Failed to book room, continuing...")
+                continue
 
     driver.quit()
