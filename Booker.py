@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 import time
 import pytz
 import json
+import pprint
 
 class Booker:
 
@@ -25,13 +26,6 @@ class Booker:
         self.end_hour = end_hour
 
     def click_next_day(self, visited_dates):
-        # check if existing booking is already selected, if there is, remove it
-        try:
-            button = self.driver.find_element(By.CLASS_NAME, "input-group-btn")
-            button.click()
-        except NoSuchElementException:
-            print("Element with class 'input-group-btn' does not exist.")
-
         goToDateButton = self.driver.find_element(By.CLASS_NAME, "fc-goToDate-button")
         goToDateButton.click()
         table = self.driver.find_element(By.CLASS_NAME, "table-condensed")
@@ -71,7 +65,7 @@ class Booker:
 
             if title[-1] == 'Available' and self.start_hour <= parsed_date.hour < self.end_hour:
                 # print("Available:", parsed_date)
-                available_rooms.append({"start": parsed_date, "end": parsed_date + timedelta(minutes=30), "room": title[6], "element": cell})
+                available_rooms.append({"start": parsed_date, "end": parsed_date + timedelta(minutes=30), "room": title[6], "element": cell, "xpath": cell.get_attribute('xpath')})
 
         return available_rooms
 
@@ -100,6 +94,13 @@ class Booker:
         return merged_bookings
 
     def book_room(self, room):
+        # check if existing booking is already selected, if there is, remove it
+        try:
+            button = self.driver.find_element(By.CLASS_NAME, "input-group-btn")
+            button.click()
+        except NoSuchElementException:
+            pass
+
         # add room to selection
         room["element"].click()
         self.driver.implicitly_wait(5)
@@ -186,6 +187,7 @@ class Booker:
             parsed_date = datetime.strptime(booking.get("start"), date_format)
             visited_dates.append(parsed_date.date())
 
+
         # go through the calendar and click on the next available Tuesday or Thursday within a week
         while self.click_next_day(visited_dates):
             # find available rooms between start_hour and end_hour
@@ -193,17 +195,22 @@ class Booker:
 
             # merge bookings that are back to back and sort them by elapsed booking time
             merged_rooms = self.merge_bookings(available_rooms)
-            merged_rooms.sort(key=lambda x: x['booking_time'], reverse=True)
             merged_rooms.sort(key=lambda x: x['room'], reverse=True)
+            merged_rooms.sort(key=lambda x: x['booking_time'], reverse=True)
+            print(f"Found {len(merged_rooms)} available rooms")
+            print("=====================================")
+            for room in merged_rooms:
+                print(f"{room['start']} - {room['end']} ({room['booking_time']}) : {room['room']}")
+            print("")
 
             # book the room with the longest booking time
             for room in merged_rooms:
-                print(f"{room['start']} - {room['end']} ({room['booking_time']}) : {room['room']}")
-                try:
-                    if self.book_room(room):
-                        break
-                except:
-                    print("Failed to book room, continuing...")
-                    continue
+                print(f"Trying to book {room['start']} - {room['end']} ({room['booking_time']}) : {room['room']}")
+                # try:
+                #     if self.book_room(room):
+                #         break
+                # except:
+                #     print("Failed to book room, continuing...")
+                #     continue
 
         self.driver.quit()

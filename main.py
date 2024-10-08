@@ -1,4 +1,4 @@
 import Booker
 
-booker = Booker.Booker(days=[1, 3], start_hour=12, end_hour=14)
+booker = Booker.Booker(days=[1, 2, 3], start_hour=11, end_hour=16, headless=True)
 booker.run()
