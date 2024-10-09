@@ -4,28 +4,49 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import Select
 from selenium.common.exceptions import NoSuchElementException
+from selenium.webdriver.chrome.service import Service
+
 import requests
 from datetime import datetime, timedelta
 import time
 import pytz
 import json
 import pprint
+import pprint
 
 class Booker:
 
-    def __init__(self, days, start_hour, end_hour, headless=True):
+    def __init__(self, days, start_hour, end_hour, max_bookings_per_day=3, confirm=True, headless=True):
         self.BASE_URL = "https://carletonu.libcal.com/spaces?lid=2986&gid=0&c=0"
         if headless:
+            # raspberry pi
+            # chrome_options = webdriver.ChromeOptions()
+            # chrome_options.add_argument('--headless')
+            # chrome_options.add_argument('--disable-gpu')
+            # chrome_options.add_argument('--no-sandbox')
+            # chrome_options.add_argument('--disable-dev-shm-usage')
+            # chrome_options.add_argument('--disable-extensions')
+            # chrome_options.add_argument('window-size=800x600')
+            # service = Service('/usr/local/bin/chromedriver')
+            # self.driver = webdriver.Chrome(service=service, options=chrome_options)
+            # self.driver.set_page_load_timeout(120)
+
+            # local
             chrome_options = Options()
             chrome_options.add_argument("--headless")
             self.driver = webdriver.Chrome(options=chrome_options)
         else:
             self.driver = webdriver.Chrome()
+            # self.driver.set_page_load_timeout(120)
         self.days = days
         self.start_hour = start_hour
         self.end_hour = end_hour
+        self.max_bookings_per_day = max_bookings_per_day
+        self.confirm = confirm
+        self.booked_days = {}
+        self.scraped_days = []
 
-    def click_next_day(self, visited_dates):
+    def click_next_day(self, skip_to_date=None):
         goToDateButton = self.driver.find_element(By.CLASS_NAME, "fc-goToDate-button")
         goToDateButton.click()
         table = self.driver.find_element(By.CLASS_NAME, "table-condensed")
@@ -39,20 +60,31 @@ class Booker:
                 dt_object = datetime.fromtimestamp(int(timestamp), tz=pytz.UTC)
                 day_of_week = dt_object.weekday()
                 today_date = datetime.now().date()
-                if (today_date + timedelta(days=8)) > dt_object.date() > today_date and day_of_week in self.days and dt_object.date() not in visited_dates:
-                    visited_dates.append(dt_object.date())
-                    print("Visiting:", dt_object.date())
-                    cell.click()
-                    return True
-                elif dt_object.date() in visited_dates:
-                    print("Skipping:", dt_object.date())
+                if skip_to_date:
+                    if skip_to_date == dt_object.date():
+                        print("Skipping to date:", dt_object.date())
+                        return dt_object.date
                     continue
-                elif dt_object.date() > (today_date + timedelta(weeks=2)):
-                    print("No more available dates, finishing...")
-                    return False
+                else:
+                    if (today_date + timedelta(days=8)) > dt_object.date() > today_date and day_of_week in self.days and dt_object.date() not in self.scraped_days and (dt_object.date() not in self.booked_days or self.booked_days[dt_object.date()] < self.max_bookings_per_day):
+                        print("Visiting:", dt_object.date())
+                        cell.click()
+                        return dt_object.date()
+                    elif dt_object.date() in self.scraped_days:
+                        # print("Skipping:", dt_object.date())
+                        continue
+                    elif dt_object.date() > (today_date + timedelta(weeks=2)):
+                        print("No more available dates, finishing...")
+                        return False
         return False
+    
+    def check_booked_hours(self, booked_hours, parsed_date):
+        for booking in booked_hours:
+            if booking['start'] <= parsed_date < booking['end']:
+                return False
+        return True
 
-    def find_available_rooms(self):
+    def find_available_rooms(self, booked_hours):
         available_rooms = []
         grid = self.driver.find_elements(By.CLASS_NAME, "fc-timeline-event-harness")
         for index, cell in enumerate(grid):
@@ -63,7 +95,7 @@ class Booker:
             date_format = '%I:%M%p %A, %B %d, %Y'
             parsed_date = datetime.strptime(date_str, date_format)
 
-            if title[-1] == 'Available' and self.start_hour <= parsed_date.hour < self.end_hour:
+            if title[-1] == 'Available' and self.start_hour <= parsed_date.hour < self.end_hour and self.check_booked_hours(booked_hours, parsed_date):
                 # print("Available:", parsed_date)
                 available_rooms.append({"start": parsed_date, "end": parsed_date + timedelta(minutes=30), "room": title[6], "element": cell, "xpath": cell.get_attribute('xpath')})
 
@@ -143,6 +175,15 @@ class Booker:
             # already logged in, just book the room
             pass
 
+        if self.confirm:
+                print(f"Confirm to book: {room['start']} - {room['end']} ({room['booking_time']} minutes) : Room {room['room']} (y/n): ")
+                confirmInput = input()
+                if confirmInput.lower() != 'y':
+                    print("Booking cancelled")
+                    self.navigate_home()
+                    self.click_next_day(skip_to_date=room['start'].date())
+                    return False
+
         try:
             self.driver.find_element(By.ID, "terms_accept").click()
             self.driver.implicitly_wait(5)
@@ -154,7 +195,7 @@ class Booker:
             self.driver.implicitly_wait(5)
 
             self.store_booking(room)
-            print(f"Successfully booked room {room['room']} on {room['start']}-{room['end']} for {room['booking_time']} minutes")
+            print(f"Successfully booked: {room['start']} - {room['end']} ({room['booking_time']} minutes) : Room {room['room']}")
             return True
         except NoSuchElementException:
             print("Failed to finalize booking the room")
@@ -168,7 +209,7 @@ class Booker:
         with open('bookings.json', 'w') as file:
             json.dump(bookings, file, indent=4)
 
-    def run(self):
+    def navigate_home(self):
         self.driver.get(self.BASE_URL)
         self.driver.implicitly_wait(5)
 
@@ -177,40 +218,55 @@ class Booker:
         select.select_by_visible_text('Conversational Floor (Floor 2 or 4)')
         self.driver.implicitly_wait(5)
 
-        visited_dates = []
+    def run(self):
+        self.navigate_home()
 
-        # add dates from bookings to visited_dates to prevent double booking days
+        booked_hours = []
+
+        # add dates from bookings to booked_hours to prevent double booking hours
         with open('bookings.json', 'r') as file:
             bookings = json.load(file)
         for booking in bookings:
             date_format = '%Y-%m-%d %H:%M:%S'
-            parsed_date = datetime.strptime(booking.get("start"), date_format)
-            visited_dates.append(parsed_date.date())
+            parsed_start = datetime.strptime(booking.get("start"), date_format)
+            parsed_end = datetime.strptime(booking.get("end"), date_format)
+            booked_hours.append({'start': parsed_start, 'end': parsed_end})
+            if (parsed_start.date() not in self.booked_days):
+                self.booked_days[parsed_start.date()] = 1
+            else:
+                self.booked_days[parsed_start.date()] += 1
 
 
         # go through the calendar and click on the next available Tuesday or Thursday within a week
-        while self.click_next_day(visited_dates):
+        current_date = None
+        while (current_date := self.click_next_day()):
             # find available rooms between start_hour and end_hour
-            available_rooms = self.find_available_rooms()
+            available_rooms = self.find_available_rooms(booked_hours=booked_hours)
 
-            # merge bookings that are back to back and sort them by elapsed booking time
+            # merge bookings that are back to back and sort them by elapsed booking time, start time, and room number
             merged_rooms = self.merge_bookings(available_rooms)
             merged_rooms.sort(key=lambda x: x['room'], reverse=True)
+            merged_rooms.sort(key=lambda x: x['start'])
             merged_rooms.sort(key=lambda x: x['booking_time'], reverse=True)
             print(f"Found {len(merged_rooms)} available rooms")
             print("=====================================")
             for room in merged_rooms:
-                print(f"{room['start']} - {room['end']} ({room['booking_time']}) : {room['room']}")
+                print(f"{room['start']} - {room['end']} ({room['booking_time']}) : Room {room['room']}")
             print("")
 
             # book the room with the longest booking time
+            booked = False
             for room in merged_rooms:
-                print(f"Trying to book {room['start']} - {room['end']} ({room['booking_time']}) : {room['room']}")
-                # try:
-                #     if self.book_room(room):
-                #         break
-                # except:
-                #     print("Failed to book room, continuing...")
-                #     continue
+                print(f"Trying to book {room['start']} - {room['end']} ({room['booking_time']}) : Room {room['room']}")
+                try:
+                    if self.book_room(room):
+                        booked = True
+                        break
+                except:
+                    print("Failed to book room, continuing...")
+                    continue
+            if not booked:
+                self.scraped_days.append(current_date)
+                print("No available rooms found, moving to next day")
 
         self.driver.quit()
